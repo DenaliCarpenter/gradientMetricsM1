@@ -5,6 +5,10 @@ library(haven)
 library(radiant)
 library(conjoint)
 library(dplyr)
+library(data.table)
+library(ranger)
+library(rsample)
+library(randomForest)
 
 # Read in the Data --------------------------------------------------------
 
@@ -49,11 +53,6 @@ fromCharToNum <- function(x){
   return(result)
 }
 
-fixRows <- function(x){
-  result <- as.character(unlist(x))
-  return(result)
-}
-
 expDataProfs <- expData %>%
   mutate_at(attributes, fromCharToNum) %>%
   dplyr::select(-response_id, -task, -answer) %>%
@@ -70,41 +69,29 @@ expDataPrefs <- expData %>%
   dplyr::select(response_id, profile, answer) %>% 
   pivot_wider(names_from = profile, values_from = answer, values_fill = NA) %>% 
   distinct() %>% 
-  column_to_rownames("response_id")
-
-expDataPrefs$profile1 <- lapply(expDataPrefs$profile1, unlist)
-  
-for(i in 1:ncol(expDataPrefs)){
-  expDataPrefs[expDataPrefs[,i] == "NULL", i] <- 0
-}
+  column_to_rownames("response_id") %>% 
+  mutate_all(as.character)
 
 for(i in 1:ncol(expDataPrefs)){
-  expDataPrefs[i,] <- unlist(as.character(expDataPrefs[i,]))
+  expDataPrefs[expDataPrefs[,i] == "NULL", i] <- NA
+  print(i)
 }
 
+expDataPrefs <- expDataPrefs %>% 
+  mutate_all(as.numeric)
 
 for(i in 1:ncol(expDataPrefs)){
-  expDataPrefs[expDataPrefs[,i] == 0, i] <- NA
+  expDataPrefs[is.na(expDataPrefs[,i]), i] <- mean(expDataPrefs[,i], na.rm = TRUE)
 }
 
-
-# for(i in 1:ncol(expDataPrefs)){
-#   expDataPrefs[is.na(expDataPrefs[,i]), i] <- mean(expDataPrefs[,i], na.rm = TRUE)
-# }
 
 preferencesFinal <- expDataPrefs
 
-duration <- expDataLevels %>% 
-  dplyr::select(contains(c(attributes[1], toupper(attributes[1])))) %>% 
-  distinct() %>% 
-  arrange(toupper(attributes[1])) %>% 
-  dplyr::select(attributes[1]) %>% 
-  as.list()
 
 levelsList <- list()
 
 for (i in 1:6) {
-  levelsList[i] <- expDataLevels %>% 
+  levelsList[i] <- expData %>% 
     dplyr::select(contains(c(attributes[i], toupper(attributes[i])))) %>% 
     distinct() %>% 
     arrange(toupper(attributes[i])) %>% 
@@ -112,9 +99,73 @@ for (i in 1:6) {
     as.list()
 }
 
+duration <- list()
+
+
+  duration <- expData %>% 
+    dplyr::select(contains(c("price", toupper("price")))) %>% 
+    distinct() %>% 
+    arrange(toupper(duration))
+
+duration <- expData %>% 
+  select(duration) %>% 
+  mutate(durationTwo = as.factor(as.numeric(as.factor(duration)))) %>% 
+  distinct() %>% 
+  arrange(durationTwo)
+
+offer <- expData %>% 
+  select(offer) %>% 
+  mutate(offerTwo = as.factor(as.numeric(as.factor(offer)))) %>% 
+  distinct() %>% 
+  arrange(offerTwo)
+
+outcome <- expData %>% 
+  select(outcome) %>% 
+  mutate(outcomeTwo = as.factor(as.numeric(as.factor(outcome)))) %>% 
+  distinct() %>% 
+  arrange(outcomeTwo)
+
+price <- expData %>% 
+  select(price) %>% 
+  mutate(priceTwo = as.numericas.factor(as.numeric(as.factor(price)))) %>% 
+  distinct() %>% 
+  arrange(priceTwo)
+
+rtb <- expData %>% 
+  select(rtb) %>% 
+  mutate(rtbTwo = as.factor(as.numeric(as.factor(rtb)))) %>% 
+  distinct() %>% 
+  arrange(rtbTwo)
+
+social_proof <- expData %>% 
+  select(social_proof) %>% 
+  mutate(social_proofTwo = as.factor(as.numeric(as.factor(social_proof)))) %>% 
+  distinct() %>% 
+  arrange(social_proofTwo)
+
 levelsFinal <- as.data.frame(unlist(levelsList))
 
-caModel(y=expDataPrefs[1,], x=expDataProfs)
+preferencesFinal <- data.frame(preferencesFinal)
+profilesFinal <- data.frame(profilesFinal)
+levelsFinal <- data.frame(levelsFinal)
 
 individualUtilities <- caPartUtilities(y=preferencesFinal, x=profilesFinal, z=levelsFinal)
+conjointModel <- Conjoint(y=preferencesFinal, x=profilesFinal, z=levelsFinal)
+caSegmentation(y=preferencesFinal, x=profilesFinal, c=3)
+
+
+# Random Forest Model to Predict Responses --------------------------------
+
+rFData <- expData %>% 
+  select(-response_id) %>% 
+  mutate_all(as.factor)
+
+set.seed(123)
+expSplit <- initial_split(rFData, prop = .7)
+expTrain <- training(expSplit)
+expTest  <- testing(expSplit)
+
+rangerOne <- ranger(answer ~ ., data = expTrain)
+results <- predict(rangerOne, expTest)$predictions
+
 
